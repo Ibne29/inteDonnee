@@ -8,7 +8,7 @@ fastify.get('/', async (request, reply) => {
 
 const start = async () => {
   try {
-    await fastify.listen(3000);
+    await fastify.listen({port: 3000, host: process.env.HOST });
     console.log('Server started at http://localhost:3000');
   } catch (err) {
     console.error(err);
