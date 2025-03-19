@@ -1,13 +1,26 @@
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import cors from '@fastify/cors';
 
 // Charger les variables d'environnement
 dotenv.config();
 
 const fastify = Fastify({ logger: true });
+
+// Configuration CORS
+await fastify.register(cors, {
+    origin: true
+  });
+
 const TMDB_API_KEY = process.env.API_KEY;
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+
+// Vérification de la clé API
+if (!TMDB_API_KEY) {
+    console.error('La clé API TMDB n\'est pas définie');
+    process.exit(1);
+}
 
 // Stockage local pour la watchlist
 let watchlist = [];
@@ -42,12 +55,12 @@ const getTMDBMovieById = async (movieId) => {
 // Routes
 fastify.get('/api/movies', async (request, reply) => {
   const { q } = request.query;
-  
   if (!q) {
     return reply.status(400).send({ 
       error: 'Le paramètre de recherche "q" est requis' 
     });
   }
+
 
   try {
     const movies = await searchTMDBMovies(q);
@@ -188,13 +201,16 @@ fastify.get('/', (request, reply) => {
 
 // Démarrer le serveur
 const start = async () => {
-  try {
-    await fastify.listen({ port: 3000 });
-    console.log('Serveur démarré sur http://localhost:3000');
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+    try {
+      await fastify.listen({ 
+        port: process.env.PORT || 3000,
+        host: '0.0.0.0'
+      });
+      console.log(`Serveur démarré sur le port ${process.env.PORT || 3000}`);
+    } catch (err) {
+      fastify.log.error(err);
+      process.exit(1);
+    }
 };
 
 start();
