@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
+import fetch from 'axios';
 import cors from '@fastify/cors';
 
 // Charger les variables d'environnement
