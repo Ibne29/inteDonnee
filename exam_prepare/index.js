@@ -20,6 +20,7 @@ let watchlist = [];
  *   - 200 : Liste des films correspondant à la recherche.
  *   - 400 : Si le paramètre "q" est manquant.
  */
+
 fastify.get('/api/movies', (request, reply) => {
   const { q } = request.query;
   if (!q) {
