@@ -1,129 +1,196 @@
 import Fastify from 'fastify';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+
+// Charger les variables d'environnement
+dotenv.config();
 
 const fastify = Fastify({ logger: true });
+const TMDB_API_KEY = process.env.API_KEY;
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// Simuler une base de données pour les films et la watchlist
-const movies = [
-  { id: 1, title: 'Inception' },
-  { id: 2, title: 'Titanic' },
-  { id: 3, title: 'The Matrix' },
-];
-
+// Stockage local pour la watchlist
 let watchlist = [];
 
-/**
- * Route : GET /api/movies
- * Description : Recherche un film par son titre.
- * Query Parameters :
- *   - q (string) : Le nom du film à rechercher.
- * Response :
- *   - 200 : Liste des films correspondant à la recherche.
- *   - 400 : Si le paramètre "q" est manquant.
- */
+// Fonctions utilitaires pour TMDB
+const searchTMDBMovies = async (query) => {
+  try {
+    const response = await fetch(
+      `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&language=fr-FR`
+    );
+    const data = await response.json();
+    return data.results;
+  } catch (error) {
+    console.error('Erreur lors de la recherche TMDB:', error);
+    throw error;
+  }
+};
 
-fastify.get('/api/movies', (request, reply) => {
+const getTMDBMovieById = async (movieId) => {
+  try {
+    const response = await fetch(
+      `${TMDB_BASE_URL}/movie/${movieId}?api_key=${TMDB_API_KEY}&language=fr-FR`
+    );
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Erreur lors de la récupération du film TMDB:', error);
+    throw error;
+  }
+};
+
+// Routes
+fastify.get('/api/movies', async (request, reply) => {
   const { q } = request.query;
+  
   if (!q) {
-    return reply.status(400).send({ error: 'Query parameter "q" is required' });
+    return reply.status(400).send({ 
+      error: 'Le paramètre de recherche "q" est requis' 
+    });
   }
-  const results = movies.filter((movie) =>
-    movie.title.toLowerCase().includes(q.toLowerCase())
-  );
-  reply.send(results);
+
+  try {
+    const movies = await searchTMDBMovies(q);
+    return {
+      results: movies.map(movie => ({
+        id: movie.id,
+        title: movie.title,
+        overview: movie.overview,
+        releaseDate: movie.release_date,
+        posterPath: movie.poster_path ? 
+          `https://image.tmdb.org/t/p/w500${movie.poster_path}` : null,
+        voteAverage: movie.vote_average
+      })),
+      count: movies.length
+    };
+  } catch (error) {
+    reply.status(500).send({ 
+      error: 'Erreur lors de la recherche des films' 
+    });
+  }
 });
 
-/**
- * Route : GET /api/watchlist
- * Description : Retourne la liste des films dans la watchlist de l'utilisateur.
- * Response :
- *   - 200 : Liste des films dans la watchlist.
- */
+fastify.get('/api/movies/:id', async (request, reply) => {
+  const { id } = request.params;
+
+  try {
+    const movie = await getTMDBMovieById(id);
+    if (movie.success === false) {
+      return reply.status(404).send({ 
+        error: 'Film non trouvé' 
+      });
+    }
+    return {
+      id: movie.id,
+      title: movie.title,
+      overview: movie.overview,
+      releaseDate: movie.release_date,
+      posterPath: movie.poster_path ? 
+        `https://image.tmdb.org/t/p/w500${movie.poster_path}` : null,
+      voteAverage: movie.vote_average,
+      genres: movie.genres,
+      runtime: movie.runtime,
+      budget: movie.budget,
+      revenue: movie.revenue
+    };
+  } catch (error) {
+    reply.status(500).send({ 
+      error: 'Erreur lors de la récupération du film' 
+    });
+  }
+});
+
 fastify.get('/api/watchlist', (request, reply) => {
-  reply.send(watchlist);
+  reply.send({ 
+    watchlist, 
+    count: watchlist.length 
+  });
 });
 
-/**
- * Route : POST /api/watchlist
- * Description : Ajoute un film à la watchlist de l'utilisateur.
- * Body Parameters (JSON) :
- *   - movieId (number) : L'ID du film à ajouter. (optionnel)
- *   - title (string) : Le titre du film à ajouter. (optionnel)
- * Response :
- *   - 200 : Confirmation de l'ajout et la watchlist mise à jour.
- *   - 400 : Si ni "movieId" ni "title" ne sont fournis.
- *   - 404 : Si le film n'est pas trouvé.
- */
-fastify.post('/api/watchlist', (request, reply) => {
-  const { movieId, title } = request.body;
+fastify.post('/api/watchlist', async (request, reply) => {
+  const { movieId } = request.body;
 
-  if (movieId) {
-    const movie = movies.find((m) => m.id === movieId);
-    if (!movie) {
-      return reply.status(404).send({ error: 'Movie not found' });
-    }
-    if (!watchlist.some((m) => m.id === movieId)) {
-      watchlist.push(movie);
-    }
-  } else if (title) {
-    const movie = movies.find((m) => m.title.toLowerCase() === title.toLowerCase());
-    if (!movie) {
-      return reply.status(404).send({ error: 'Movie not found' });
-    }
-    if (!watchlist.some((m) => m.title.toLowerCase() === title.toLowerCase())) {
-      watchlist.push(movie);
-    }
-  } else {
-    return reply.status(400).send({ error: 'Either "movieId" or "title" is required' });
+  if (!movieId) {
+    return reply.status(400).send({ 
+      error: 'L\'ID du film est requis' 
+    });
   }
 
-  reply.send({ message: 'Movie added to watchlist', watchlist });
+  try {
+    // Vérifier si le film est déjà dans la watchlist
+    if (watchlist.some(m => m.id === movieId)) {
+      return reply.status(400).send({ 
+        error: 'Ce film est déjà dans votre watchlist' 
+      });
+    }
+
+    // Récupérer les détails du film depuis TMDB
+    const movie = await getTMDBMovieById(movieId);
+    if (movie.success === false) {
+      return reply.status(404).send({ 
+        error: 'Film non trouvé' 
+      });
+    }
+
+    // Ajouter le film à la watchlist
+    const movieData = {
+      id: movie.id,
+      title: movie.title,
+      posterPath: movie.poster_path ? 
+        `https://image.tmdb.org/t/p/w500${movie.poster_path}` : null,
+      addedAt: new Date()
+    };
+
+    watchlist.push(movieData);
+    reply.send({ 
+      message: 'Film ajouté à la watchlist', 
+      movie: movieData 
+    });
+  } catch (error) {
+    reply.status(500).send({ 
+      error: 'Erreur lors de l\'ajout du film à la watchlist' 
+    });
+  }
 });
 
-/**
- * Route : DELETE /api/watchlist
- * Description : Retire un film de la watchlist de l'utilisateur.
- * Body Parameters (JSON) :
- *   - movieId (number) : L'ID du film à retirer. (optionnel)
- *   - title (string) : Le titre du film à retirer. (optionnel)
- * Response :
- *   - 200 : Confirmation de la suppression et la watchlist mise à jour.
- *   - 400 : Si ni "movieId" ni "title" ne sont fournis.
- */
-fastify.delete('/api/watchlist', (request, reply) => {
-  const { movieId, title } = request.body;
+fastify.delete('/api/watchlist/:id', (request, reply) => {
+  const { id } = request.params;
+  const movieId = parseInt(id);
 
-  if (movieId) {
-    watchlist = watchlist.filter((m) => m.id !== movieId);
-  } else if (title) {
-    watchlist = watchlist.filter((m) => m.title.toLowerCase() !== title.toLowerCase());
-  } else {
-    return reply.status(400).send({ error: 'Either "movieId" or "title" is required' });
+  const initialLength = watchlist.length;
+  watchlist = watchlist.filter(movie => movie.id !== movieId);
+
+  if (watchlist.length === initialLength) {
+    return reply.status(404).send({ 
+      error: 'Film non trouvé dans la watchlist' 
+    });
   }
 
-  reply.send({ message: 'Movie removed from watchlist', watchlist });
+  reply.send({ 
+    message: 'Film retiré de la watchlist', 
+    removedId: movieId 
+  });
 });
 
-/**
- * Route par défaut : GET /
- * Description : Fournit une réponse par défaut pour la racine.
- */
+// Route racine avec documentation
 fastify.get('/', (request, reply) => {
-  reply.send({ message: 'Bienvenue sur l\'API Fastify !' });
-});
-
-/**
- * Gestion des routes non définies
- * Description : Retourne une erreur 404 pour les routes inexistantes.
- */
-fastify.setNotFoundHandler((request, reply) => {
-  reply.status(404).send({ error: 'Route not found' });
+  reply.send({
+    message: 'Bienvenue sur l\'API Films avec TMDB !',
+    endpoints: {
+      'GET /api/movies?q=:query': 'Rechercher des films',
+      'GET /api/movies/:id': 'Obtenir les détails d\'un film',
+      'GET /api/watchlist': 'Voir votre watchlist',
+      'POST /api/watchlist': 'Ajouter un film à votre watchlist',
+      'DELETE /api/watchlist/:id': 'Retirer un film de votre watchlist'
+    }
+  });
 });
 
 // Démarrer le serveur
 const start = async () => {
   try {
     await fastify.listen({ port: 3000 });
-    console.log('Server is running on http://localhost:3000');
+    console.log('Serveur démarré sur http://localhost:3000');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
